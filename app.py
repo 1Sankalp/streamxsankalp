@@ -2,7 +2,9 @@ from flask import Flask, render_template, Response, request, jsonify, session, f
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required
 from flask_socketio import SocketIO, emit, send
 import requests
+from dotenv import load_dotenv
 import re
+import os
 from datetime import timedelta
 from twilio.jwt.access_token import AccessToken
 from twilio.jwt.access_token.grants import VideoGrant
@@ -15,6 +17,9 @@ app.config['SECRET_KEY'] = 'Sankalp@893'
 
 login_manager = LoginManager(app)
 login_manager.login_view = 'login'
+
+load_dotenv()
+
 
 join_requests = []
 def send_join_request(username):
@@ -35,9 +40,9 @@ def load_user(user_id):
 
 
 # Twilio API credentials
-account_sid = 'AC801ba1fad08a04d4a4b688199099d4d5'
-api_key = 'c7d2ead381520f5661c1e2e76406153f'
-api_secret = 'pRimGaR9GjdLORDED5JXoyoQoQDzGLK2'
+account_sid = os.getenv('TWILIO_ACCOUNT_SID')
+api_key = os.getenv('TWILIO_API_KEY')
+api_secret = os.getenv('TWILIO_API_SECRET')
 room_name = "sankalp's room"
 
 
