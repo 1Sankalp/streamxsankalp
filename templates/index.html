@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Watch Together</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.3.2/socket.io.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://media.twiliocdn.com/sdk/js/video/releases/2.17.0/twilio-video.min.js"></script>
+    <style>
+        #main-container {
+            display: flex;
+        }
+        #video-container {
+            margin-left: 5px;
+            margin-top: -1px;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            align-items: center;
+        }
+        #video-container video {
+            width: 250px;
+            height: 190px;
+            margin-bottom: 10px;
+        }
+        #buttons-container {
+            display: flex;
+            flex-direction: row;
+            justify-content: center;
+            align-items: center;
+            margin-top: -10px;
+        }
+        #toggleVideoButton,
+        #toggleAudioButton {
+            width: 120px;
+            height: 40px;
+            font-size: 12px;
+            margin-left: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div id="main-container">
+        <div>
+            <video id="myVideo" controls width="1200" height="500">
+                <source src="/video" type="video/mp4">
+                Your browser does not support the video tag.
+            </video>
+        </div>
+        <div id="video-container">
+            <div id="localVideoContainer">
+                <video id="localVideo" autoplay muted></video>
+            </div>
+            <div id="remoteVideos"></div>
+            <div id="buttons-container">
+                <button id="toggleVideoButton" onclick="toggleVideo()">Toggle Video</button>
+                <button id="toggleAudioButton" onclick="toggleAudio()">Toggle Audio</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io.connect(location.protocol + '//' + document.domain + ':' + location.port);
+        const peers = {};
+
+        navigator.mediaDevices.getUserMedia({ video: true, audio: true }).then(localStream => {
+            document.getElementById("localVideo").srcObject = localStream;
+
+            socket.on("sdp", data => {
+                const peer = createPeer(data.socketId);
+                peer.setRemoteDescription(new RTCSessionDescription(data.sdp)).then(() => {
+                    if (data.sdp.type === "offer") {
+                        peer.createAnswer().then(answer => {
+                            return peer.setLocalDescription(answer);
+                        }).then(() => {
+                            socket.emit("sdp", { sdp: peer.localDescription, socketId: data.socketId });
+                        });
+                    }
+                });
+            });
+
+            socket.on("ice_candidate", data => {
+                const peer = peers[data.socketId];
+                if (peer) {
+                    peer.addIceCandidate(new RTCIceCandidate(data.candidate));
+                }
+            });
+
+            socket.on("connect", () => {
+                createPeer(socket.id);
+            });
+
+        }).catch(error => console.error(error));
+
+        function createPeer(socketId) {
+            const peer = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.stunprotocol.org" }] });
+            peers[socketId] = peer;
+
+            const localStream = document.getElementById("localVideo").srcObject;
+            localStream.getTracks().forEach(track => peer.addTrack(track, localStream));
+
+            peer.onicecandidate = event => {
+                if (event.candidate) {
+                    socket.emit("ice_candidate", { candidate: event.candidate, socketId: socketId });
+                }
+            };
+
+            peer.ontrack = event => {
+                let remoteVideos = document.getElementById("remoteVideos");
+                let remoteVideo = document.createElement("video");
+                remoteVideo.id = "remoteVideo-" + socketId;
+                remoteVideo.srcObject = event.streams[0];
+                remoteVideo.autoplay = true;
+                remoteVideos.appendChild(remoteVideo);
+            };
+
+            if (socketId === socket.id) {
+                peer.createOffer().then(offer => {
+                    return peer.setLocalDescription(offer);
+                }).then(() => {
+                    socket.emit("sdp", { sdp: peer.localDescription, socketId: socketId });
+                });
+            }
+
+            return peer;
+        }
+
+        // Function to toggle video on/off
+        function toggleVideo() {
+            const localVideo = document.getElementById("localVideo");
+            const videoEnabled = localVideo.srcObject.getVideoTracks()[0].enabled;
+            localVideo.srcObject.getVideoTracks().forEach(track => {
+                if (track.kind === "video") {
+                    track.enabled = !videoEnabled; // Toggle video enabled state only for your own video
+                }
+            });
+
+            // Update button text
+            const toggleButton = document.getElementById("toggleVideoButton");
+            toggleButton.innerText = localVideo.srcObject.getVideoTracks()[0].enabled ? "Video On" : "Video Off";
+
+            socket.emit("video_state", { enabled: localVideo.srcObject.getVideoTracks()[0].enabled });
+        }
+
+        // Function to toggle audio on/off
+        function toggleAudio() {
+            const localVideo = document.getElementById("localVideo");
+            const audioEnabled = localVideo.srcObject.getAudioTracks()[0].enabled;
+            localVideo.srcObject.getAudioTracks().forEach(track => {
+                if (track.kind === "audio") {
+                    track.enabled = !audioEnabled; // Toggle audio enabled state only for your own audio
+                }
+            });
+
+            // Update button text
+            const toggleButton = document.getElementById("toggleAudioButton");
+            toggleButton.innerText = localVideo.srcObject.getAudioTracks()[0].enabled ? "Audio On" : "Audio Off";
+
+            socket.emit("audio_state", { enabled: localVideo.srcObject.getAudioTracks()[0].enabled });
+        }
+
+        socket.on("audio_state", data => {
+            const remoteVideo = document.getElementById(`remoteVideo-${data.socketId}`);
+            if (remoteVideo) {
+                const audioIndicator = remoteVideo.nextElementSibling;
+                audioIndicator.innerText = data.enabled ? "Audio On" : "Audio Off";
+            }
+        });
+
+        // Listen for video state changes from other clients
+        socket.on("video_state", data => {
+            const remoteVideo = document.getElementById(`remoteVideo-${data.socketId}`);
+            if (remoteVideo) {
+                const videoIndicator = remoteVideo.nextElementSibling;
+                videoIndicator.innerText = data.enabled ? "Video On" : "Video Off";
+            }
+        });
+    </script>
+</body>
+
